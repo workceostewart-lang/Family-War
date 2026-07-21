@@ -1,0 +1,10 @@
+{
+  "name": "Family War",
+  "short_name": "Family War",
+  "description": "A fast family survey showdown for phones, tablets, and PC.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06132e",
+  "theme_color": "#0a2450",
+  "orientation": "any"
+}

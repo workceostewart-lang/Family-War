@@ -1,0 +1,29 @@
+# Family War Agent Guide
+
+Family War is a responsive, voice-hosted survey game built with Next.js/vinext for Cloudflare Sites.
+
+## Product guardrails
+
+- Treat the game board as the product. On mobile, the current question, all six answer slots, the full three-strike indicator, team scores, and answer input must fit inside the visible viewport without horizontal scrolling.
+- Keep the visual language deep blue, electric blue, cyan, and restrained red for strikes.
+- Questions must stay visible while players answer and must have a replayable spoken-host control.
+- Maintain 44px touch targets wherever space allows and full keyboard play on desktop.
+- Never claim the party code provides live cross-device synchronization until a real lobby backend is added.
+
+## Project map
+
+- `app/page.tsx` contains the client game and menu flow.
+- `app/globals.css` contains the responsive game-show presentation.
+- `lib/game-engine.mjs` contains answer normalization and fuzzy matching shared by the UI and tests.
+- `tests/` covers engine behavior and rendered output.
+
+## Local checks
+
+- `npm run dev` starts the live game.
+- `npm test` builds and runs the automated checks.
+- Validate both 1440×900 desktop and 390×844 mobile layouts before publishing.
+
+## Hosting
+
+- Preserve the vinext build and `.openai/hosting.json` project identity.
+- Production is intended for `family-war.fantomzone.app` under the Fantom Zone game collection.
