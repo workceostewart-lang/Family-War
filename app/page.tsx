@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { chooseCpuAnswer, findMatchingAnswer, makeLobbyCode } from "../lib/game-engine.mjs";
-import { BONUS_QUESTIONS, pickQuestionIds, QUESTIONS } from "../lib/questions.mjs";
+import { BONUS_QUESTIONS, pickQuestionCycleIds, pickQuestionIds, QUESTIONS } from "../lib/questions.mjs";
 
 type Difficulty = "easy" | "medium" | "hard";
 type Opponent = "cpu" | "local" | "online";
@@ -36,6 +36,7 @@ type SharedGameState = {
   roundSeconds?: number;
   roundQuestionIds?: number[];
   bonusQuestionIds?: number[];
+  usedBonusQuestionIds?: number[];
   transitioning: boolean;
   paused: boolean;
 };
@@ -88,6 +89,7 @@ export default function Home() {
   const [bonusSeconds, setBonusSeconds] = useState(BONUS_TIME_LIMIT);
   const [roundQuestionIds, setRoundQuestionIds] = useState(() => pickQuestionIds(QUESTIONS.length, ROUND_COUNT));
   const [bonusQuestionIds, setBonusQuestionIds] = useState(() => pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT));
+  const [usedBonusQuestionIds, setUsedBonusQuestionIds] = useState<number[]>([]);
   const [transitioning, setTransitioning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [roomCode, setRoomCode] = useState("");
@@ -218,12 +220,22 @@ export default function Home() {
     const names: [string, string] = [lobby.hostFamilyName, lobby.guestFamilyName || "The Challengers"];
     const remoteRoundIds = lobby.gameState?.roundQuestionIds;
     const remoteBonusIds = lobby.gameState?.bonusQuestionIds;
+    const remoteUsedBonusIds = lobby.gameState?.usedBonusQuestionIds;
+    const nextBonusCycle = pickQuestionCycleIds(
+      BONUS_QUESTIONS.length,
+      BONUS_QUESTION_COUNT,
+      usedBonusQuestionIds,
+      bonusQuestionIds,
+    );
     const nextRoundIds = hasValidQuestionDeck(remoteRoundIds, QUESTIONS.length, ROUND_COUNT)
       ? remoteRoundIds!
       : pickQuestionIds(QUESTIONS.length, ROUND_COUNT, roundQuestionIds);
     const nextBonusIds = hasValidQuestionDeck(remoteBonusIds, BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT)
       ? remoteBonusIds!
-      : pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT, bonusQuestionIds);
+      : nextBonusCycle.ids;
+    const nextUsedBonusIds = Array.isArray(remoteUsedBonusIds)
+      ? [...new Set(remoteUsedBonusIds.filter((id) => Number.isInteger(id) && id >= 0 && id < BONUS_QUESTIONS.length))]
+      : nextBonusCycle.usedIds;
     setOpponent("online");
     setTeamNames(names);
     setDifficulty(lobby.difficulty);
@@ -240,11 +252,12 @@ export default function Home() {
     setBonusSeconds(lobby.gameState?.bonusSeconds ?? BONUS_TIME_LIMIT);
     setRoundQuestionIds(nextRoundIds);
     setBonusQuestionIds(nextBonusIds);
+    setUsedBonusQuestionIds(nextUsedBonusIds);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
     window.setTimeout(() => inputRef.current?.focus(), 350);
-  }, [bonusQuestionIds, roundQuestionIds]);
+  }, [bonusQuestionIds, roundQuestionIds, usedBonusQuestionIds]);
 
   const openSetup = () => {
     playSound("select");
@@ -258,7 +271,12 @@ export default function Home() {
 
   const startGame = () => {
     const nextRoundIds = pickQuestionIds(QUESTIONS.length, ROUND_COUNT, roundQuestionIds);
-    const nextBonusIds = pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT, bonusQuestionIds);
+    const nextBonusCycle = pickQuestionCycleIds(
+      BONUS_QUESTIONS.length,
+      BONUS_QUESTION_COUNT,
+      usedBonusQuestionIds,
+      bonusQuestionIds,
+    );
     playSound("correct");
     setOnlineRole(null);
     setOnlineToken("");
@@ -274,7 +292,8 @@ export default function Home() {
     setRoundSeconds(ROUND_TIME_LIMIT);
     setBonusSeconds(BONUS_TIME_LIMIT);
     setRoundQuestionIds(nextRoundIds);
-    setBonusQuestionIds(nextBonusIds);
+    setBonusQuestionIds(nextBonusCycle.ids);
+    setUsedBonusQuestionIds(nextBonusCycle.usedIds);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
@@ -583,6 +602,7 @@ export default function Home() {
       roundSeconds,
       roundQuestionIds,
       bonusQuestionIds,
+      usedBonusQuestionIds,
       transitioning,
       paused,
     };
@@ -594,7 +614,7 @@ export default function Home() {
       });
     }, 100);
     return () => window.clearTimeout(timer);
-  }, [bonusIndex, bonusQuestionIds, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, roundQuestionIds, roundSeconds, scores, screen, status, transitioning]);
+  }, [bonusIndex, bonusQuestionIds, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, roundQuestionIds, roundSeconds, scores, screen, status, transitioning, usedBonusQuestionIds]);
 
   useEffect(() => {
     if (screen !== "game" || onlineRole !== "guest" || !activeLobbyCode || !onlineToken) return;
@@ -623,6 +643,7 @@ export default function Home() {
         setRoundSeconds(remote.roundSeconds ?? ROUND_TIME_LIMIT);
         if (hasValidQuestionDeck(remote.roundQuestionIds, QUESTIONS.length, ROUND_COUNT)) setRoundQuestionIds(remote.roundQuestionIds!);
         if (hasValidQuestionDeck(remote.bonusQuestionIds, BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT)) setBonusQuestionIds(remote.bonusQuestionIds!);
+        if (Array.isArray(remote.usedBonusQuestionIds)) setUsedBonusQuestionIds(remote.usedBonusQuestionIds);
         setTransitioning(remote.transitioning);
         setPaused(remote.paused);
       } catch {

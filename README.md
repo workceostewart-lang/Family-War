@@ -6,7 +6,7 @@ A fast, voice-hosted family survey game made for phones, tablets, and PC. Player
 
 - Responsive blue game-show UI with a no-scroll mobile game board
 - Three escalating survey rounds with strikes, steals, fuzzy answer matching, and a visible 60-second clock for every answer
-- 57 regular and 25 rapid-fire questions, shuffled into a fresh set that avoids the previous game
+- 57 regular and 75 rapid-fire questions; Sudden Death cycles through all 75 before repeating and always avoids the previous game
 - CPU and same-screen family modes with Easy, Medium, and Hard tuning
 - Private cross-device lobbies with durable Cloudflare D1 state and short party codes
 - Spoken questions, replayable host audio, and Web Audio sound effects

@@ -9,3 +9,10 @@ export function pickQuestionIds(
   excluded?: number[],
   random?: () => number,
 ): number[];
+export function pickQuestionCycleIds(
+  poolSize: number,
+  count: number,
+  used?: number[],
+  previous?: number[],
+  random?: () => number,
+): { ids: number[]; usedIds: number[] };
