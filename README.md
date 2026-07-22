@@ -32,4 +32,8 @@ The test command creates the Cloudflare-compatible production build, runs the ga
 
 ## Production
 
-The project uses vinext and Cloudflare Sites. Hosting identity is stored in `.openai/hosting.json`; the intended custom hostname is `family-war.fantomzone.app`.
+The project uses vinext and is published through Cloudflare Sites and the Fantom Zone Cloudflare Worker route. Hosting identity is stored in `.openai/hosting.json`, while `wrangler.jsonc` owns the public `family-war.fantomzone.app/*` route so it takes priority over Fantom Zone's fallback game.
+
+```bash
+npm run deploy:cloudflare
+```

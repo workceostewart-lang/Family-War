@@ -26,4 +26,6 @@ Family War is a responsive, voice-hosted survey game built with Next.js/vinext f
 ## Hosting
 
 - Preserve the vinext build and `.openai/hosting.json` project identity.
-- Production is intended for `family-war.fantomzone.app` under the Fantom Zone game collection.
+- Production is `family-war.fantomzone.app` under the Fantom Zone game collection.
+- Preserve the exact Worker route in `wrangler.jsonc`; it must remain more specific than Fantom Zone's wildcard fallback route.
+- `npm run deploy:cloudflare` builds and publishes the public Worker route.

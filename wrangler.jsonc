@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "family-war-fantomzone",
+  "compatibility_date": "2026-05-15",
+  "routes": [
+    {
+      "pattern": "family-war.fantomzone.app/*",
+      "zone_name": "fantomzone.app"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

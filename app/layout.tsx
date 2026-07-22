@@ -24,15 +24,15 @@ export async function generateMetadata(): Promise<Metadata> {
     description: "A fast, voice-hosted family survey game built for game night on phones, tablets, and PC.",
     metadataBase: new URL(origin),
     applicationName: "Family War",
-    manifest: "/manifest.webmanifest",
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+    manifest: "/family-war.webmanifest",
+    icons: { icon: "/family-war-favicon.svg", shortcut: "/family-war-favicon.svg" },
     openGraph: {
       title: "Family War — Own the Board",
       description: "Call the answers. Dodge three strikes. Own the board.",
       type: "website",
-      images: [{ url: `${origin}/og.png`, width: 1200, height: 630, alt: "Family War game board" }],
+      images: [{ url: `${origin}/family-war-og.png`, width: 1200, height: 630, alt: "Family War game board" }],
     },
-    twitter: { card: "summary_large_image", title: "Family War", description: "The family game-night showdown.", images: [`${origin}/og.png`] },
+    twitter: { card: "summary_large_image", title: "Family War", description: "The family game-night showdown.", images: [`${origin}/family-war-og.png`] },
   };
 }
 
