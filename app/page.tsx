@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { chooseCpuAnswer, findMatchingAnswer, makeLobbyCode } from "../lib/game-engine.mjs";
+import { BONUS_QUESTIONS, pickQuestionIds, QUESTIONS } from "../lib/questions.mjs";
 
 type Difficulty = "easy" | "medium" | "hard";
 type Opponent = "cpu" | "local" | "online";
@@ -11,8 +12,6 @@ type GamePhase = "round" | "bonus-intro" | "bonus-playing" | "bonus-end";
 type Modal = "rules" | "settings" | null;
 type OnlineRole = "host" | "guest" | null;
 
-type Answer = { text: string; points: number; aliases?: string[] };
-type Question = { prompt: string; answers: Answer[] };
 type LobbyInfo = {
   code: string;
   status: "waiting" | "started";
@@ -34,121 +33,12 @@ type SharedGameState = {
   bonusIndex: number;
   bonusScore: number;
   bonusSeconds: number;
+  roundSeconds?: number;
+  roundQuestionIds?: number[];
+  bonusQuestionIds?: number[];
   transitioning: boolean;
   paused: boolean;
 };
-
-const QUESTIONS: Question[] = [
-  {
-    prompt: "Name something families always seem to run out of.",
-    answers: [
-      { text: "Toilet paper", points: 34, aliases: ["bathroom tissue", "tp"] },
-      { text: "Milk", points: 22 },
-      { text: "Money", points: 16, aliases: ["cash"] },
-      { text: "Patience", points: 12 },
-      { text: "Snacks", points: 9, aliases: ["food"] },
-      { text: "Hot water", points: 7 },
-    ],
-  },
-  {
-    prompt: "Name something people do while waiting for food to arrive.",
-    answers: [
-      { text: "Check their phone", points: 38, aliases: ["use phone", "phone"] },
-      { text: "Talk", points: 25, aliases: ["chat", "conversation"] },
-      { text: "Drink", points: 14, aliases: ["have a drink"] },
-      { text: "Look at the menu", points: 10, aliases: ["read menu"] },
-      { text: "People-watch", points: 8, aliases: ["watch people"] },
-      { text: "Complain", points: 5 },
-    ],
-  },
-  {
-    prompt: "Name a reason a kid tries to stay up past bedtime.",
-    answers: [
-      { text: "Watch TV", points: 32, aliases: ["television", "tv"] },
-      { text: "Play games", points: 24, aliases: ["video games", "gaming"] },
-      { text: "Not tired", points: 18, aliases: ["wide awake"] },
-      { text: "Read", points: 11, aliases: ["read a book"] },
-      { text: "Get a snack", points: 9, aliases: ["snack", "eat"] },
-      { text: "Avoid tomorrow", points: 6, aliases: ["school tomorrow"] },
-    ],
-  },
-  {
-    prompt: "Name something you might find between couch cushions.",
-    answers: [
-      { text: "Coins", points: 36, aliases: ["money", "change"] },
-      { text: "Food crumbs", points: 25, aliases: ["crumbs", "food"] },
-      { text: "Remote control", points: 17, aliases: ["remote"] },
-      { text: "Phone", points: 9, aliases: ["cell phone"] },
-      { text: "Keys", points: 8 },
-      { text: "Toy", points: 5, aliases: ["toys"] },
-    ],
-  },
-  {
-    prompt: "Name something that can turn a calm family trip into chaos.",
-    answers: [
-      { text: "Traffic", points: 31, aliases: ["traffic jam"] },
-      { text: "Getting lost", points: 23, aliases: ["wrong directions", "lost"] },
-      { text: "Car trouble", points: 18, aliases: ["flat tire", "breakdown"] },
-      { text: "Hungry kids", points: 12, aliases: ["hunger", "hungry"] },
-      { text: "Bad weather", points: 10, aliases: ["rain", "storm"] },
-      { text: "Forgotten bags", points: 6, aliases: ["forgot luggage", "luggage"] },
-    ],
-  },
-  {
-    prompt: "Name something people celebrate with cake.",
-    answers: [
-      { text: "Birthday", points: 48, aliases: ["birthdays"] },
-      { text: "Wedding", points: 19, aliases: ["marriage"] },
-      { text: "Graduation", points: 12 },
-      { text: "Anniversary", points: 9 },
-      { text: "Retirement", points: 7 },
-      { text: "New baby", points: 5, aliases: ["baby shower"] },
-    ],
-  },
-];
-
-const BONUS_QUESTIONS: Question[] = [
-  {
-    prompt: "Name something you do before leaving the house.",
-    answers: [
-      { text: "Lock the door", points: 46, aliases: ["lock door"] },
-      { text: "Check pockets", points: 34, aliases: ["get keys", "grab phone"] },
-      { text: "Turn off lights", points: 27, aliases: ["lights"] },
-    ],
-  },
-  {
-    prompt: "Name a food that is hard to eat neatly.",
-    answers: [
-      { text: "Spaghetti", points: 47, aliases: ["pasta", "noodles"] },
-      { text: "Tacos", points: 38, aliases: ["taco"] },
-      { text: "Ribs", points: 29, aliases: ["barbecue ribs"] },
-    ],
-  },
-  {
-    prompt: "Name something people lose at least once a week.",
-    answers: [
-      { text: "Keys", points: 44, aliases: ["car keys"] },
-      { text: "Phone", points: 37, aliases: ["cell phone"] },
-      { text: "Remote", points: 25, aliases: ["remote control"] },
-    ],
-  },
-  {
-    prompt: "Name a place where people whisper.",
-    answers: [
-      { text: "Library", points: 52 },
-      { text: "Church", points: 33, aliases: ["place of worship"] },
-      { text: "Movie theater", points: 24, aliases: ["cinema", "movies"] },
-    ],
-  },
-  {
-    prompt: "Name something that makes a weekend feel complete.",
-    answers: [
-      { text: "Sleeping in", points: 49, aliases: ["sleep", "rest"] },
-      { text: "Family time", points: 36, aliases: ["family", "friends"] },
-      { text: "Good food", points: 28, aliases: ["dinner", "meal"] },
-    ],
-  },
-];
 
 const DIFFICULTY_COPY: Record<Difficulty, string> = {
   easy: "Forgiving answers · relaxed CPU",
@@ -163,6 +53,18 @@ const defaultRound = (roundIndex = 0) => ({
   stealing: false,
   bank: 0,
 });
+
+const ROUND_COUNT = 3;
+const BONUS_QUESTION_COUNT = 5;
+const ROUND_TIME_LIMIT = 60;
+const BONUS_TIME_LIMIT = 40;
+
+const hasValidQuestionDeck = (ids: number[] | undefined, poolSize: number, count: number) => (
+  Array.isArray(ids)
+  && ids.length === count
+  && new Set(ids).size === count
+  && ids.every((id) => Number.isInteger(id) && id >= 0 && id < poolSize)
+);
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -182,7 +84,10 @@ export default function Home() {
   const [champion, setChampion] = useState<TeamIndex>(0);
   const [bonusIndex, setBonusIndex] = useState(0);
   const [bonusScore, setBonusScore] = useState(0);
-  const [bonusSeconds, setBonusSeconds] = useState(30);
+  const [roundSeconds, setRoundSeconds] = useState(ROUND_TIME_LIMIT);
+  const [bonusSeconds, setBonusSeconds] = useState(BONUS_TIME_LIMIT);
+  const [roundQuestionIds, setRoundQuestionIds] = useState(() => pickQuestionIds(QUESTIONS.length, ROUND_COUNT));
+  const [bonusQuestionIds, setBonusQuestionIds] = useState(() => pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT));
   const [transitioning, setTransitioning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [roomCode, setRoomCode] = useState("");
@@ -195,7 +100,8 @@ export default function Home() {
   const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const question = QUESTIONS[roundIndex];
+  const question = QUESTIONS[roundQuestionIds[roundIndex] ?? roundQuestionIds[0] ?? 0];
+  const bonusQuestion = BONUS_QUESTIONS[bonusQuestionIds[bonusIndex] ?? bonusQuestionIds[0] ?? 0];
   const multiplier = roundIndex + 1;
   const activeTeam = round.control;
   const cpuTurn = screen === "game" && phase === "round" && opponent === "cpu" && activeTeam === 1;
@@ -271,11 +177,11 @@ export default function Home() {
 
   useEffect(() => {
     if (screen !== "game" || paused) return;
-    const currentPrompt = phase === "bonus-playing" ? BONUS_QUESTIONS[bonusIndex]?.prompt : phase === "round" ? question?.prompt : "";
+    const currentPrompt = phase === "bonus-playing" ? bonusQuestion?.prompt : phase === "round" ? question?.prompt : "";
     if (!currentPrompt) return;
     const timer = window.setTimeout(() => speak(currentPrompt), 350);
     return () => window.clearTimeout(timer);
-  }, [bonusIndex, paused, phase, question, screen, speak]);
+  }, [bonusIndex, bonusQuestion, paused, phase, question, screen, speak]);
 
   useEffect(() => {
     if (phase !== "bonus-playing" || paused || bonusSeconds <= 0 || onlineRole === "guest") return;
@@ -310,6 +216,14 @@ export default function Home() {
 
   const beginOnlineGame = useCallback((lobby: LobbyInfo) => {
     const names: [string, string] = [lobby.hostFamilyName, lobby.guestFamilyName || "The Challengers"];
+    const remoteRoundIds = lobby.gameState?.roundQuestionIds;
+    const remoteBonusIds = lobby.gameState?.bonusQuestionIds;
+    const nextRoundIds = hasValidQuestionDeck(remoteRoundIds, QUESTIONS.length, ROUND_COUNT)
+      ? remoteRoundIds!
+      : pickQuestionIds(QUESTIONS.length, ROUND_COUNT, roundQuestionIds);
+    const nextBonusIds = hasValidQuestionDeck(remoteBonusIds, BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT)
+      ? remoteBonusIds!
+      : pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT, bonusQuestionIds);
     setOpponent("online");
     setTeamNames(names);
     setDifficulty(lobby.difficulty);
@@ -322,12 +236,15 @@ export default function Home() {
     setChampion(0);
     setBonusIndex(0);
     setBonusScore(0);
-    setBonusSeconds(30);
+    setRoundSeconds(lobby.gameState?.roundSeconds ?? ROUND_TIME_LIMIT);
+    setBonusSeconds(lobby.gameState?.bonusSeconds ?? BONUS_TIME_LIMIT);
+    setRoundQuestionIds(nextRoundIds);
+    setBonusQuestionIds(nextBonusIds);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
     window.setTimeout(() => inputRef.current?.focus(), 350);
-  }, []);
+  }, [bonusQuestionIds, roundQuestionIds]);
 
   const openSetup = () => {
     playSound("select");
@@ -340,6 +257,8 @@ export default function Home() {
   };
 
   const startGame = () => {
+    const nextRoundIds = pickQuestionIds(QUESTIONS.length, ROUND_COUNT, roundQuestionIds);
+    const nextBonusIds = pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT, bonusQuestionIds);
     playSound("correct");
     setOnlineRole(null);
     setOnlineToken("");
@@ -352,7 +271,10 @@ export default function Home() {
     setStatus(`${cleanTeamNames[0]} has control. Name an answer!`);
     setBonusIndex(0);
     setBonusScore(0);
-    setBonusSeconds(30);
+    setRoundSeconds(ROUND_TIME_LIMIT);
+    setBonusSeconds(BONUS_TIME_LIMIT);
+    setRoundQuestionIds(nextRoundIds);
+    setBonusQuestionIds(nextBonusIds);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
@@ -482,7 +404,7 @@ export default function Home() {
     setTransitioning(true);
     playSound("win");
     transitionTimer.current = setTimeout(() => {
-      if (roundIndex >= QUESTIONS.length - 1 || roundIndex >= 2) {
+      if (roundIndex >= ROUND_COUNT - 1) {
         const winner: TeamIndex = nextScores[1] > nextScores[0] ? 1 : 0;
         setChampion(winner);
         setPhase("bonus-intro");
@@ -491,6 +413,7 @@ export default function Home() {
         const nextRoundIndex = roundIndex + 1;
         setRoundIndex(nextRoundIndex);
         setRound(defaultRound(nextRoundIndex));
+        setRoundSeconds(ROUND_TIME_LIMIT);
         setStatus(`${cleanTeamNames[nextRoundIndex % 2]} starts Round ${nextRoundIndex + 1}.`);
       }
       setAnswer("");
@@ -499,10 +422,11 @@ export default function Home() {
     }, 950);
   }, [cleanTeamNames, playSound, roundIndex, scores]);
 
-  const processRoundAnswer = useCallback((guess: string) => {
-    if (transitioning || !guess.trim()) return;
-    const match = findMatchingAnswer(guess, question.answers, round.revealed, difficulty);
+  const processRoundAnswer = useCallback((guess: string, timedOut = false) => {
+    if (transitioning || (!timedOut && !guess.trim())) return;
+    const match = timedOut ? -1 : findMatchingAnswer(guess, question.answers, round.revealed, difficulty);
     setAnswer("");
+    setRoundSeconds(ROUND_TIME_LIMIT);
 
     if (match >= 0) {
       const points = question.answers[match].points * multiplier;
@@ -522,7 +446,7 @@ export default function Home() {
     playSound("strike");
     if (round.stealing) {
       const defendingTeam = (round.control === 0 ? 1 : 0) as TeamIndex;
-      awardRound(defendingTeam, round.bank, `No steal! ${cleanTeamNames[defendingTeam]} keeps ${round.bank} points.`);
+      awardRound(defendingTeam, round.bank, `${timedOut ? "Time! " : ""}No steal! ${cleanTeamNames[defendingTeam]} keeps ${round.bank} points.`);
       return;
     }
 
@@ -530,12 +454,29 @@ export default function Home() {
     if (strikes >= 3) {
       const stealingTeam = (round.control === 0 ? 1 : 0) as TeamIndex;
       setRound({ ...round, strikes: 3, control: stealingTeam, stealing: true });
-      setStatus(`Three strikes! ${cleanTeamNames[stealingTeam]} gets one answer to steal.`);
+      setStatus(`${timedOut ? "Time! " : ""}Three strikes! ${cleanTeamNames[stealingTeam]} gets one answer to steal.`);
     } else {
       setRound({ ...round, strikes });
-      setStatus(`Strike ${strikes}! ${cleanTeamNames[round.control]} still has control.`);
+      setStatus(`${timedOut ? "Time! " : ""}Strike ${strikes}! ${cleanTeamNames[round.control]} still has control.`);
     }
   }, [awardRound, cleanTeamNames, difficulty, multiplier, playSound, question, round, transitioning]);
+
+  useEffect(() => {
+    if (screen !== "game" || phase !== "round" || paused || transitioning || roundSeconds <= 0 || onlineRole === "guest") return;
+    const timer = window.setInterval(() => {
+      setRoundSeconds((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [onlineRole, paused, phase, roundSeconds, screen, transitioning]);
+
+  useEffect(() => {
+    if (onlineRole === "guest" || phase !== "round") return;
+    if (roundSeconds === 0) {
+      const timer = window.setTimeout(() => processRoundAnswer("", true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (roundSeconds <= 5) playSound("tick");
+  }, [onlineRole, phase, playSound, processRoundAnswer, roundSeconds]);
 
   const sendOnlineAnswer = useCallback(async (guess: string) => {
     if (!lobbyInfo || !onlineToken) return;
@@ -585,21 +526,20 @@ export default function Home() {
     setPhase("bonus-playing");
     setBonusIndex(0);
     setBonusScore(0);
-    setBonusSeconds(30);
-    setStatus("Five questions. Thirty seconds. Reach 200 points!");
+    setBonusSeconds(BONUS_TIME_LIMIT);
+    setStatus("Five questions. Forty seconds. Reach 200 points!");
     window.setTimeout(() => inputRef.current?.focus(), 200);
   };
 
   const processBonusAnswer = useCallback((guess: string) => {
     if (!guess.trim() || phase !== "bonus-playing") return;
-    const bonusQuestion = BONUS_QUESTIONS[bonusIndex];
     const match = findMatchingAnswer(guess, bonusQuestion.answers, [], difficulty);
     const points = match >= 0 ? bonusQuestion.answers[match].points : 0;
     const nextScore = bonusScore + points;
     setBonusScore(nextScore);
     setAnswer("");
     playSound(points > 0 ? "correct" : "strike");
-    if (bonusIndex >= BONUS_QUESTIONS.length - 1) {
+    if (bonusIndex >= bonusQuestionIds.length - 1) {
       setPhase("bonus-end");
       setStatus(points > 0 ? `Final answer scores ${points}!` : "Final answer scores zero.");
       window.setTimeout(() => playSound(nextScore >= 200 ? "win" : "strike"), 250);
@@ -608,7 +548,7 @@ export default function Home() {
       setBonusIndex((value) => value + 1);
       window.setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [bonusIndex, bonusScore, difficulty, phase, playSound]);
+  }, [bonusIndex, bonusQuestion, bonusQuestionIds.length, bonusScore, difficulty, phase, playSound]);
 
   const submitBonusAnswer = async (event: FormEvent) => {
     event.preventDefault();
@@ -640,6 +580,9 @@ export default function Home() {
       bonusIndex,
       bonusScore,
       bonusSeconds,
+      roundSeconds,
+      roundQuestionIds,
+      bonusQuestionIds,
       transitioning,
       paused,
     };
@@ -651,7 +594,7 @@ export default function Home() {
       });
     }, 100);
     return () => window.clearTimeout(timer);
-  }, [bonusIndex, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, scores, screen, status, transitioning]);
+  }, [bonusIndex, bonusQuestionIds, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, roundQuestionIds, roundSeconds, scores, screen, status, transitioning]);
 
   useEffect(() => {
     if (screen !== "game" || onlineRole !== "guest" || !activeLobbyCode || !onlineToken) return;
@@ -677,6 +620,9 @@ export default function Home() {
         setBonusIndex(remote.bonusIndex);
         setBonusScore(remote.bonusScore);
         setBonusSeconds(remote.bonusSeconds);
+        setRoundSeconds(remote.roundSeconds ?? ROUND_TIME_LIMIT);
+        if (hasValidQuestionDeck(remote.roundQuestionIds, QUESTIONS.length, ROUND_COUNT)) setRoundQuestionIds(remote.roundQuestionIds!);
+        if (hasValidQuestionDeck(remote.bonusQuestionIds, BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT)) setBonusQuestionIds(remote.bonusQuestionIds!);
         setTransitioning(remote.transitioning);
         setPaused(remote.paused);
       } catch {
@@ -744,10 +690,10 @@ export default function Home() {
               <span className="eyebrow">THE PLAYBOOK</span>
               <h2 id="modal-title">How to play</h2>
               <ol className="rules-list">
-                <li><b>Find the board.</b><span>Type a popular survey answer. Close matches and common synonyms count.</span></li>
+                <li><b>Find the board.</b><span>Type a popular survey answer before the 60-second answer clock expires. Close matches and common synonyms count.</span></li>
                 <li><b>Protect control.</b><span>Three misses means the other family gets one chance to steal the bank.</span></li>
                 <li><b>Build the score.</b><span>Rounds are worth 1×, 2×, then 3× points.</span></li>
-                <li><b>Finish the war.</b><span>The winner gets a 30-second Championship Rush to reach 200 bonus points.</span></li>
+                <li><b>Finish the war.</b><span>The winner gets a 40-second Sudden Death Championship Rush to reach 200 bonus points.</span></li>
               </ol>
             </>
           ) : (
@@ -937,13 +883,13 @@ export default function Home() {
   }
 
   const isBonus = phase !== "round";
-  const gamePrompt = phase === "bonus-playing" ? BONUS_QUESTIONS[bonusIndex].prompt : question.prompt;
+  const gamePrompt = phase === "bonus-playing" ? bonusQuestion.prompt : question.prompt;
 
   return (
     <main className={`game-shell ${isBonus ? "bonus-mode" : ""}`}>
       <header className="game-header">
         <div className="mini-brand"><span>FW</span><b>FAMILY WAR</b></div>
-        <div className="round-chip">{isBonus ? "CHAMPIONSHIP RUSH" : `ROUND ${roundIndex + 1} · ${multiplier}× POINTS`}</div>
+        <div className="round-chip">{isBonus ? "SUDDEN DEATH · CHAMPIONSHIP RUSH" : `ROUND ${roundIndex + 1} · ${multiplier}× POINTS`}</div>
         {onlineRole !== "guest" ? <button className="icon-button" data-testid="pause-game" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button> : <div className="online-badge">LIVE · {lobbyInfo?.code}</div>}
       </header>
 
@@ -970,7 +916,8 @@ export default function Home() {
           <h1>{phase === "bonus-intro" ? `${cleanTeamNames[champion]} owns the board!` : phase === "bonus-end" ? (bonusScore >= 200 ? "Championship won!" : "A fierce finish!") : gamePrompt}</h1>
         </div>
         {(phase === "round" || phase === "bonus-playing") && <button onClick={() => speak(gamePrompt)} aria-label="Read question aloud">♫ <span>PLAY QUESTION</span></button>}
-        {phase === "bonus-playing" && <time className={bonusSeconds <= 5 ? "danger" : ""}>{bonusSeconds}</time>}
+        {phase === "round" && <time data-testid="round-timer" className={roundSeconds <= 10 ? "danger" : ""} aria-label={`${roundSeconds} seconds left`}>{roundSeconds}</time>}
+        {phase === "bonus-playing" && <time data-testid="bonus-timer" className={bonusSeconds <= 5 ? "danger" : ""} aria-label={`${bonusSeconds} seconds left`}>{bonusSeconds}</time>}
       </section>
 
       {phase === "round" && (
@@ -991,14 +938,14 @@ export default function Home() {
       {phase === "bonus-intro" && (
         <section className="bonus-panel">
           <div className="trophy">★</div>
-          <div><span>ONE LAST CHALLENGE</span><h2>5 questions · 30 seconds · 200 points</h2><p>The winning family gets one rapid-fire answer for each question. The host reads every prompt aloud.</p></div>
+          <div><span>SUDDEN DEATH</span><h2>5 questions · 40 seconds · 200 points</h2><p>The winning family gets one rapid-fire answer for each question. The host reads every prompt aloud.</p></div>
           {onlineRole !== "guest" ? <button className="primary-button" onClick={startBonus}><span>Start the rush</span><b>→</b></button> : <div className="guest-waiting">The host is opening the bonus board…</div>}
         </section>
       )}
 
       {phase === "bonus-playing" && (
         <section className="bonus-progress" aria-label="Bonus round progress">
-          {BONUS_QUESTIONS.map((_, index) => <i key={index} className={index < bonusIndex ? "done" : index === bonusIndex ? "active" : ""}>{index < bonusIndex ? "✓" : index + 1}</i>)}
+          {bonusQuestionIds.map((questionId, index) => <i key={questionId} className={index < bonusIndex ? "done" : index === bonusIndex ? "active" : ""}>{index < bonusIndex ? "✓" : index + 1}</i>)}
         </section>
       )}
 
