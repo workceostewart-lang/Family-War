@@ -1,0 +1,1 @@
+CREATE INDEX `lobbies_updated_at_idx` ON `lobbies` (`updated_at`);

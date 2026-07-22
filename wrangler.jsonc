@@ -12,6 +12,14 @@
       "custom_domain": true
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "family-war-lobbies",
+      "database_id": "5245139a-f977-4a95-bc1f-06beab7d6b30",
+      "migrations_dir": "drizzle"
+    }
+  ],
   "observability": {
     "enabled": true
   }

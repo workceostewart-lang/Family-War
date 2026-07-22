@@ -8,13 +8,15 @@ Family War is a responsive, voice-hosted survey game built with Next.js/vinext f
 - Keep the visual language deep blue, electric blue, cyan, and restrained red for strikes.
 - Questions must stay visible while players answer and must have a replayable spoken-host control.
 - Maintain 44px touch targets wherever space allows and full keyboard play on desktop.
-- Never claim the party code provides live cross-device synchronization until a real lobby backend is added.
+- Private lobby codes use Cloudflare D1 for real cross-device waiting rooms, host-authoritative board synchronization, and guest answer submission. Keep host and guest tokens private and require them on lobby reads and writes.
 
 ## Project map
 
 - `app/page.tsx` contains the client game and menu flow.
 - `app/globals.css` contains the responsive game-show presentation.
 - `lib/game-engine.mjs` contains answer normalization and fuzzy matching shared by the UI and tests.
+- `app/api/lobbies/` and `db/` contain the private-lobby API and durable D1 schema.
+- `drizzle/` contains the production database migrations.
 - `tests/` covers engine behavior and rendered output.
 
 ## Local checks
@@ -28,4 +30,5 @@ Family War is a responsive, voice-hosted survey game built with Next.js/vinext f
 - Preserve the vinext build and `.openai/hosting.json` project identity.
 - Production is `family-war.fantomzone.app` under the Fantom Zone game collection.
 - Preserve the exact Worker route in `wrangler.jsonc`; it must remain more specific than Fantom Zone's wildcard fallback route.
+- Preserve the `DB` D1 binding and run pending Drizzle migrations before publishing a direct Worker build.
 - `npm run deploy:cloudflare` builds and publishes the public Worker route.

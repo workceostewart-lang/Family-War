@@ -4,14 +4,39 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { chooseCpuAnswer, findMatchingAnswer, makeLobbyCode } from "../lib/game-engine.mjs";
 
 type Difficulty = "easy" | "medium" | "hard";
-type Opponent = "cpu" | "local";
+type Opponent = "cpu" | "local" | "online";
 type TeamIndex = 0 | 1;
-type Screen = "menu" | "setup" | "game";
+type Screen = "menu" | "setup" | "lobby" | "game";
 type GamePhase = "round" | "bonus-intro" | "bonus-playing" | "bonus-end";
 type Modal = "rules" | "settings" | null;
+type OnlineRole = "host" | "guest" | null;
 
 type Answer = { text: string; points: number; aliases?: string[] };
 type Question = { prompt: string; answers: Answer[] };
+type LobbyInfo = {
+  code: string;
+  status: "waiting" | "started";
+  hostFamilyName: string;
+  guestFamilyName: string | null;
+  familySize: number;
+  difficulty: Difficulty;
+  gameState?: SharedGameState | null;
+  pendingAnswer?: string | null;
+  pendingBy?: OnlineRole;
+};
+type SharedGameState = {
+  roundIndex: number;
+  round: ReturnType<typeof defaultRound>;
+  scores: [number, number];
+  status: string;
+  phase: GamePhase;
+  champion: TeamIndex;
+  bonusIndex: number;
+  bonusScore: number;
+  bonusSeconds: number;
+  transitioning: boolean;
+  paused: boolean;
+};
 
 const QUESTIONS: Question[] = [
   {
@@ -161,6 +186,12 @@ export default function Home() {
   const [transitioning, setTransitioning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [roomCode, setRoomCode] = useState("");
+  const [onlineRole, setOnlineRole] = useState<OnlineRole>(null);
+  const [onlineToken, setOnlineToken] = useState("");
+  const [lobbyInfo, setLobbyInfo] = useState<LobbyInfo | null>(null);
+  const [lobbyBusy, setLobbyBusy] = useState(false);
+  const [lobbyError, setLobbyError] = useState("");
+  const [joinCode, setJoinCode] = useState("");
   const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -168,18 +199,27 @@ export default function Home() {
   const multiplier = roundIndex + 1;
   const activeTeam = round.control;
   const cpuTurn = screen === "game" && phase === "round" && opponent === "cpu" && activeTeam === 1;
+  const onlineInputLocked = onlineRole === "host"
+    ? (phase === "round" ? activeTeam !== 0 : champion !== 0)
+    : onlineRole === "guest"
+      ? (phase === "round" ? activeTeam !== 1 : champion !== 1)
+      : false;
+  const activeLobbyCode = lobbyInfo?.code;
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("family-war-preferences");
-      if (!stored) return;
-      const prefs = JSON.parse(stored) as { soundOn?: boolean; voiceOn?: boolean; difficulty?: Difficulty };
-      if (typeof prefs.soundOn === "boolean") setSoundOn(prefs.soundOn);
-      if (typeof prefs.voiceOn === "boolean") setVoiceOn(prefs.voiceOn);
-      if (prefs.difficulty && ["easy", "medium", "hard"].includes(prefs.difficulty)) setDifficulty(prefs.difficulty);
-    } catch {
-      // Preferences are optional; an invalid value should never block the game.
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        const stored = window.localStorage.getItem("family-war-preferences");
+        if (!stored) return;
+        const prefs = JSON.parse(stored) as { soundOn?: boolean; voiceOn?: boolean; difficulty?: Difficulty };
+        if (typeof prefs.soundOn === "boolean") setSoundOn(prefs.soundOn);
+        if (typeof prefs.voiceOn === "boolean") setVoiceOn(prefs.voiceOn);
+        if (prefs.difficulty && ["easy", "medium", "hard"].includes(prefs.difficulty)) setDifficulty(prefs.difficulty);
+      } catch {
+        // Preferences are optional; an invalid value should never block the game.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -238,21 +278,25 @@ export default function Home() {
   }, [bonusIndex, paused, phase, question, screen, speak]);
 
   useEffect(() => {
-    if (phase !== "bonus-playing" || paused || bonusSeconds <= 0) return;
+    if (phase !== "bonus-playing" || paused || bonusSeconds <= 0 || onlineRole === "guest") return;
     const timer = window.setInterval(() => {
       setBonusSeconds((value) => Math.max(0, value - 1));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [bonusSeconds, paused, phase]);
+  }, [bonusSeconds, onlineRole, paused, phase]);
 
   useEffect(() => {
+    if (onlineRole === "guest") return;
     if (phase === "bonus-playing" && bonusSeconds === 0) {
-      setPhase("bonus-end");
-      setStatus("Time! The final board is locked.");
-      playSound(bonusScore >= 200 ? "win" : "strike");
+      const timer = window.setTimeout(() => {
+        setPhase("bonus-end");
+        setStatus("Time! The final board is locked.");
+        playSound(bonusScore >= 200 ? "win" : "strike");
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     if (phase === "bonus-playing" && bonusSeconds > 0 && bonusSeconds <= 5) playSound("tick");
-  }, [bonusScore, bonusSeconds, phase, playSound]);
+  }, [bonusScore, bonusSeconds, onlineRole, phase, playSound]);
 
   useEffect(() => () => {
     if (transitionTimer.current) clearTimeout(transitionTimer.current);
@@ -264,14 +308,42 @@ export default function Home() {
     opponent === "cpu" ? "The Rivals" : teamNames[1].trim() || "The Challengers",
   ], [opponent, teamNames]);
 
+  const beginOnlineGame = useCallback((lobby: LobbyInfo) => {
+    const names: [string, string] = [lobby.hostFamilyName, lobby.guestFamilyName || "The Challengers"];
+    setOpponent("online");
+    setTeamNames(names);
+    setDifficulty(lobby.difficulty);
+    setFamilySize(lobby.familySize);
+    setRoundIndex(0);
+    setRound(defaultRound(0));
+    setScores([0, 0]);
+    setPhase("round");
+    setStatus(`${names[0]} has control. Name an answer!`);
+    setChampion(0);
+    setBonusIndex(0);
+    setBonusScore(0);
+    setBonusSeconds(30);
+    setTransitioning(false);
+    setPaused(false);
+    setScreen("game");
+    window.setTimeout(() => inputRef.current?.focus(), 350);
+  }, []);
+
   const openSetup = () => {
     playSound("select");
     setRoomCode(makeLobbyCode());
+    setOnlineRole(null);
+    setOnlineToken("");
+    setLobbyInfo(null);
+    setLobbyError("");
     setScreen("setup");
   };
 
   const startGame = () => {
     playSound("correct");
+    setOnlineRole(null);
+    setOnlineToken("");
+    setLobbyInfo(null);
     setTeamNames(cleanTeamNames);
     setRoundIndex(0);
     setRound(defaultRound(0));
@@ -291,9 +363,116 @@ export default function Home() {
     if (transitionTimer.current) clearTimeout(transitionTimer.current);
     window.speechSynthesis?.cancel();
     setPaused(false);
+    setOnlineRole(null);
+    setOnlineToken("");
+    setLobbyInfo(null);
     setScreen("menu");
     setStatus("Ready for another Family War?");
   };
+
+  const createPrivateLobby = async () => {
+    setLobbyBusy(true);
+    setLobbyError("");
+    try {
+      const response = await fetch("/api/lobbies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ familyName: teamNames[0], familySize, difficulty }),
+      });
+      const data = await response.json() as { token?: string; role?: OnlineRole; lobby?: LobbyInfo; error?: string };
+      if (!response.ok || !data.token || !data.lobby) throw new Error(data.error || "Could not create the lobby.");
+      setOnlineRole("host");
+      setOnlineToken(data.token);
+      setLobbyInfo(data.lobby);
+      setScreen("lobby");
+      playSound("correct");
+    } catch (error) {
+      setLobbyError(error instanceof Error ? error.message : "Could not create the lobby.");
+      playSound("strike");
+    } finally {
+      setLobbyBusy(false);
+    }
+  };
+
+  const joinPrivateLobby = async () => {
+    const code = joinCode.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+    if (code.length !== 6) {
+      setLobbyError("Enter the six-character lobby code.");
+      return;
+    }
+    setLobbyBusy(true);
+    setLobbyError("");
+    try {
+      const response = await fetch(`/api/lobbies/${code}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "join", familyName: teamNames[0] }),
+      });
+      const data = await response.json() as { token?: string; role?: OnlineRole; lobby?: LobbyInfo; error?: string };
+      if (!response.ok || !data.token || !data.lobby) throw new Error(data.error || "Could not join the lobby.");
+      setOnlineRole("guest");
+      setOnlineToken(data.token);
+      setLobbyInfo(data.lobby);
+      setScreen("lobby");
+      playSound("correct");
+    } catch (error) {
+      setLobbyError(error instanceof Error ? error.message : "Could not join the lobby.");
+      playSound("strike");
+    } finally {
+      setLobbyBusy(false);
+    }
+  };
+
+  const startPrivateLobby = async () => {
+    if (!lobbyInfo || onlineRole !== "host") return;
+    setLobbyBusy(true);
+    setLobbyError("");
+    try {
+      const response = await fetch(`/api/lobbies/${lobbyInfo.code}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${onlineToken}` },
+        body: JSON.stringify({ action: "start" }),
+      });
+      const data = await response.json() as { lobby?: LobbyInfo; error?: string };
+      if (!response.ok || !data.lobby) throw new Error(data.error || "Could not start the match.");
+      setLobbyInfo(data.lobby);
+      beginOnlineGame(data.lobby);
+      playSound("win");
+    } catch (error) {
+      setLobbyError(error instanceof Error ? error.message : "Could not start the match.");
+      playSound("strike");
+    } finally {
+      setLobbyBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (screen !== "lobby" || !activeLobbyCode || !onlineToken) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/lobbies/${activeLobbyCode}`, {
+          headers: { authorization: `Bearer ${onlineToken}` },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = await response.json() as { lobby?: LobbyInfo };
+        if (cancelled || !data.lobby) return;
+        setLobbyInfo(data.lobby);
+        if (data.lobby.status === "started" && onlineRole === "guest") beginOnlineGame(data.lobby);
+      } catch {
+        // A later poll will recover from a brief connection interruption.
+      } finally {
+        if (!cancelled) timer = window.setTimeout(() => void poll(), 1000);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [activeLobbyCode, beginOnlineGame, onlineRole, onlineToken, screen]);
 
   const awardRound = useCallback((team: TeamIndex, points: number, message: string) => {
     const nextScores: [number, number] = [...scores];
@@ -358,20 +537,47 @@ export default function Home() {
     }
   }, [awardRound, cleanTeamNames, difficulty, multiplier, playSound, question, round, transitioning]);
 
-  const submitRoundAnswer = (event: FormEvent) => {
+  const sendOnlineAnswer = useCallback(async (guess: string) => {
+    if (!lobbyInfo || !onlineToken) return;
+    const response = await fetch(`/api/lobbies/${lobbyInfo.code}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${onlineToken}` },
+      body: JSON.stringify({ action: "answer", answer: guess }),
+    });
+    const data = await response.json() as { accepted?: boolean; error?: string };
+    if (!response.ok) throw new Error(data.error || "The answer could not be sent.");
+  }, [lobbyInfo, onlineToken]);
+
+  const submitRoundAnswer = async (event: FormEvent) => {
     event.preventDefault();
+    if (onlineRole === "guest") {
+      if (onlineInputLocked || !answer.trim()) return;
+      const guess = answer;
+      setAnswer("");
+      setStatus("Answer sent to the host board…");
+      try {
+        await sendOnlineAnswer(guess);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "The answer could not be sent.");
+        playSound("strike");
+      }
+      return;
+    }
     processRoundAnswer(answer);
   };
 
   useEffect(() => {
     if (!cpuTurn || transitioning || paused) return;
-    setStatus(`${cleanTeamNames[1]} is thinking…`);
     const delay = { easy: 1500, medium: 1050, hard: 700 }[difficulty];
+    const thinkingTimer = window.setTimeout(() => setStatus(`${cleanTeamNames[1]} is thinking…`), 0);
     const timer = window.setTimeout(() => {
       const cpuAnswer = chooseCpuAnswer(question.answers, round.revealed, difficulty);
       processRoundAnswer(cpuAnswer);
     }, delay);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(thinkingTimer);
+      window.clearTimeout(timer);
+    };
   }, [cleanTeamNames, cpuTurn, difficulty, paused, processRoundAnswer, question.answers, round.revealed, transitioning]);
 
   const startBonus = () => {
@@ -384,11 +590,10 @@ export default function Home() {
     window.setTimeout(() => inputRef.current?.focus(), 200);
   };
 
-  const submitBonusAnswer = (event: FormEvent) => {
-    event.preventDefault();
-    if (!answer.trim() || phase !== "bonus-playing") return;
+  const processBonusAnswer = useCallback((guess: string) => {
+    if (!guess.trim() || phase !== "bonus-playing") return;
     const bonusQuestion = BONUS_QUESTIONS[bonusIndex];
-    const match = findMatchingAnswer(answer, bonusQuestion.answers, [], difficulty);
+    const match = findMatchingAnswer(guess, bonusQuestion.answers, [], difficulty);
     const points = match >= 0 ? bonusQuestion.answers[match].points : 0;
     const nextScore = bonusScore + points;
     setBonusScore(nextScore);
@@ -403,7 +608,130 @@ export default function Home() {
       setBonusIndex((value) => value + 1);
       window.setTimeout(() => inputRef.current?.focus(), 100);
     }
+  }, [bonusIndex, bonusScore, difficulty, phase, playSound]);
+
+  const submitBonusAnswer = async (event: FormEvent) => {
+    event.preventDefault();
+    if (onlineRole === "guest") {
+      if (onlineInputLocked || !answer.trim()) return;
+      const guess = answer;
+      setAnswer("");
+      setStatus("Bonus answer sent to the host board…");
+      try {
+        await sendOnlineAnswer(guess);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "The answer could not be sent.");
+        playSound("strike");
+      }
+      return;
+    }
+    processBonusAnswer(answer);
   };
+
+  useEffect(() => {
+    if (screen !== "game" || onlineRole !== "host" || !lobbyInfo || !onlineToken) return;
+    const gameState: SharedGameState = {
+      roundIndex,
+      round,
+      scores,
+      status,
+      phase,
+      champion,
+      bonusIndex,
+      bonusScore,
+      bonusSeconds,
+      transitioning,
+      paused,
+    };
+    const timer = window.setTimeout(() => {
+      void fetch(`/api/lobbies/${lobbyInfo.code}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: `Bearer ${onlineToken}` },
+        body: JSON.stringify({ gameState }),
+      });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [bonusIndex, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, scores, screen, status, transitioning]);
+
+  useEffect(() => {
+    if (screen !== "game" || onlineRole !== "guest" || !activeLobbyCode || !onlineToken) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/lobbies/${activeLobbyCode}`, {
+          headers: { authorization: `Bearer ${onlineToken}` },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = await response.json() as { lobby?: LobbyInfo };
+        const remote = data.lobby?.gameState;
+        if (cancelled || !remote) return;
+        setLobbyInfo(data.lobby!);
+        setRoundIndex(remote.roundIndex);
+        setRound(remote.round);
+        setScores(remote.scores);
+        setStatus(remote.status);
+        setPhase(remote.phase);
+        setChampion(remote.champion);
+        setBonusIndex(remote.bonusIndex);
+        setBonusScore(remote.bonusScore);
+        setBonusSeconds(remote.bonusSeconds);
+        setTransitioning(remote.transitioning);
+        setPaused(remote.paused);
+      } catch {
+        // The shared board catches up on the next poll.
+      } finally {
+        if (!cancelled) timer = window.setTimeout(() => void poll(), 700);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [activeLobbyCode, onlineRole, onlineToken, screen]);
+
+  useEffect(() => {
+    if (screen !== "game" || onlineRole !== "host" || !activeLobbyCode || !onlineToken) return;
+    let cancelled = false;
+    let judging = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (judging || transitioning || paused) {
+        if (!cancelled) timer = window.setTimeout(() => void poll(), 650);
+        return;
+      }
+      try {
+        const response = await fetch(`/api/lobbies/${activeLobbyCode}`, {
+          headers: { authorization: `Bearer ${onlineToken}` },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = await response.json() as { lobby?: LobbyInfo };
+        const pending = data.lobby?.pendingAnswer;
+        if (cancelled || !pending) return;
+        judging = true;
+        if (phase === "round") processRoundAnswer(pending);
+        else if (phase === "bonus-playing") processBonusAnswer(pending);
+        await fetch(`/api/lobbies/${activeLobbyCode}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${onlineToken}` },
+          body: JSON.stringify({ action: "consume" }),
+        });
+        judging = false;
+      } catch {
+        judging = false;
+      } finally {
+        if (!cancelled) timer = window.setTimeout(() => void poll(), 650);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [activeLobbyCode, onlineRole, onlineToken, paused, phase, processBonusAnswer, processRoundAnswer, screen, transitioning]);
 
   const renderModal = () => {
     if (!modal) return null;
@@ -515,11 +843,12 @@ export default function Home() {
               </div>
             </fieldset>
 
-            <fieldset className="setup-group">
+            <fieldset className="setup-group opponent-group">
               <legend><i>02</i><span><b>Opponent</b><small>Choose who stands across the board</small></span></legend>
-              <div className="choice-grid two">
+              <div className="choice-grid three opponent-grid">
                 <button className={opponent === "cpu" ? "selected" : ""} onClick={() => setOpponent("cpu")} aria-pressed={opponent === "cpu"}><span>CPU</span><b>Vs. Rivals</b><small>Smart computer family</small></button>
                 <button className={opponent === "local" ? "selected" : ""} onClick={() => setOpponent("local")} aria-pressed={opponent === "local"}><span>2P</span><b>Same Screen</b><small>Pass-and-play family</small></button>
+                <button className={opponent === "online" ? "selected" : ""} onClick={() => setOpponent("online")} aria-pressed={opponent === "online"}><span>LIVE</span><b>Private Lobby</b><small>Join from another device</small></button>
               </div>
             </fieldset>
 
@@ -539,12 +868,68 @@ export default function Home() {
             </fieldset>
           </div>
 
-          <div className="room-ticket">
-            <div><span>PARTY CODE</span><b>{roomCode}</b></div>
-            <p>Your local match badge for this setup. Live cross-device rooms are the next arena upgrade.</p>
-          </div>
+          {opponent === "online" ? (
+            <section className="online-lobby-setup" aria-label="Private lobby options">
+              <button className="primary-button" data-testid="create-lobby" onClick={createPrivateLobby} disabled={lobbyBusy}><span>{lobbyBusy ? "Opening lobby…" : "Create private lobby"}</span><b>＋</b></button>
+              <div className="join-lobby-row">
+                <label htmlFor="join-code">OR JOIN WITH A CODE</label>
+                <input id="join-code" data-testid="join-code" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))} maxLength={6} placeholder="ABC123" autoCapitalize="characters" />
+                <button className="secondary-button" data-testid="join-lobby" onClick={joinPrivateLobby} disabled={lobbyBusy || joinCode.length !== 6}>Join lobby</button>
+              </div>
+              <p>One family hosts the board; the second family joins from any phone, tablet, or PC.</p>
+              {lobbyError && <div className="lobby-error" role="alert">{lobbyError}</div>}
+            </section>
+          ) : (
+            <>
+              <div className="room-ticket">
+                <div><span>MATCH BADGE</span><b>{roomCode}</b></div>
+                <p>A quick identifier for this same-screen game-night setup.</p>
+              </div>
+              <button className="primary-button start-button" data-testid="start-game" onClick={startGame}><span>Start the war</span><b>→</b></button>
+            </>
+          )}
+        </section>
+        {renderModal()}
+      </main>
+    );
+  }
 
-          <button className="primary-button start-button" data-testid="start-game" onClick={startGame}><span>Start the war</span><b>→</b></button>
+  if (screen === "lobby" && lobbyInfo) {
+    const filled = Boolean(lobbyInfo.guestFamilyName);
+    return (
+      <main className="setup-shell lobby-shell">
+        <header className="compact-header">
+          <button className="back-button" onClick={() => { setScreen("setup"); setLobbyInfo(null); setOnlineRole(null); setOnlineToken(""); }}>← <span>Leave lobby</span></button>
+          <div className="mini-brand"><span>FW</span> FAMILY WAR</div>
+          <button className="icon-button" onClick={() => setModal("settings")} aria-label="Open settings">♫</button>
+        </header>
+        <section className="lobby-card" data-testid="waiting-room">
+          <div className="lobby-heading">
+            <span className="live-pill"><i /> PRIVATE LOBBY</span>
+            <h1>Bring in the challengers</h1>
+            <p>Share this code. The waiting room updates automatically on every device.</p>
+          </div>
+          <div className="lobby-code-panel">
+            <span>LOBBY CODE</span>
+            <strong data-testid="lobby-code">{lobbyInfo.code}</strong>
+            <button className="secondary-button" onClick={() => navigator.clipboard?.writeText(lobbyInfo.code)}>Copy code</button>
+          </div>
+          <div className="lobby-families">
+            <article className="family-seat ready">
+              <span>HOST FAMILY</span><h2>{lobbyInfo.hostFamilyName}</h2><p>{lobbyInfo.familySize} {lobbyInfo.familySize === 1 ? "player" : "players"} · Ready</p>
+            </article>
+            <div className="versus-badge">VS</div>
+            <article className={`family-seat ${filled ? "ready" : "waiting"}`}>
+              <span>CHALLENGER FAMILY</span><h2>{lobbyInfo.guestFamilyName || "Waiting to join…"}</h2><p>{filled ? `${lobbyInfo.familySize} ${lobbyInfo.familySize === 1 ? "player" : "players"} · Ready` : "Share the lobby code"}</p>
+            </article>
+          </div>
+          <div className="lobby-status-line" aria-live="polite"><i className={filled ? "ready" : ""} />{filled ? "Both families are connected." : "Looking for the challenger family…"}</div>
+          {onlineRole === "host" ? (
+            <button className="primary-button start-button" data-testid="start-online-game" onClick={startPrivateLobby} disabled={!filled || lobbyBusy}><span>{lobbyBusy ? "Starting…" : filled ? "Start the war" : "Waiting for family"}</span><b>→</b></button>
+          ) : (
+            <div className="guest-waiting">The host will start the match when both families are ready.</div>
+          )}
+          {lobbyError && <div className="lobby-error" role="alert">{lobbyError}</div>}
         </section>
         {renderModal()}
       </main>
@@ -559,7 +944,7 @@ export default function Home() {
       <header className="game-header">
         <div className="mini-brand"><span>FW</span><b>FAMILY WAR</b></div>
         <div className="round-chip">{isBonus ? "CHAMPIONSHIP RUSH" : `ROUND ${roundIndex + 1} · ${multiplier}× POINTS`}</div>
-        <button className="icon-button" data-testid="pause-game" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button>
+        {onlineRole !== "guest" ? <button className="icon-button" data-testid="pause-game" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button> : <div className="online-badge">LIVE · {lobbyInfo?.code}</div>}
       </header>
 
       <section className="score-ribbon" aria-label="Scoreboard">
@@ -607,7 +992,7 @@ export default function Home() {
         <section className="bonus-panel">
           <div className="trophy">★</div>
           <div><span>ONE LAST CHALLENGE</span><h2>5 questions · 30 seconds · 200 points</h2><p>The winning family gets one rapid-fire answer for each question. The host reads every prompt aloud.</p></div>
-          <button className="primary-button" onClick={startBonus}><span>Start the rush</span><b>→</b></button>
+          {onlineRole !== "guest" ? <button className="primary-button" onClick={startBonus}><span>Start the rush</span><b>→</b></button> : <div className="guest-waiting">The host is opening the bonus board…</div>}
         </section>
       )}
 
@@ -621,7 +1006,7 @@ export default function Home() {
         <section className="bonus-result">
           <div className="result-burst"><span>{bonusScore}</span><small>/ 200</small></div>
           <div><span className="eyebrow">FINAL SCORE</span><h2>{bonusScore >= 200 ? `${cleanTeamNames[champion]} are Family War champions!` : `${cleanTeamNames[champion]} won the war!`}</h2><p>{bonusScore >= 200 ? "You conquered the Championship Rush." : "The main-game trophy is yours. The bonus board awaits a rematch."}</p></div>
-          <button className="primary-button" onClick={startGame}><span>Play again</span><b>↻</b></button>
+          {onlineRole !== "guest" ? <button className="primary-button" onClick={() => onlineRole && lobbyInfo ? beginOnlineGame(lobbyInfo) : startGame()}><span>Play again</span><b>↻</b></button> : <div className="guest-waiting">Waiting for the host to choose the next match.</div>}
           <button className="secondary-button" onClick={leaveGame}>Main menu</button>
         </section>
       )}
@@ -629,11 +1014,11 @@ export default function Home() {
       {(phase === "round" || phase === "bonus-playing") && (
         <div className="answer-console">
           <div className="status-line" aria-live="polite"><i />{status}</div>
-          <form onSubmit={phase === "round" ? submitRoundAnswer : submitBonusAnswer} aria-busy={cpuTurn}>
+          <form onSubmit={phase === "round" ? submitRoundAnswer : submitBonusAnswer} aria-busy={cpuTurn || onlineInputLocked}>
             <label htmlFor="answer-input">YOUR ANSWER</label>
-            <input ref={inputRef} id="answer-input" data-testid="answer-input" value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={32} autoComplete="off" enterKeyHint="send" placeholder={cpuTurn ? "The Rivals are thinking…" : "Type what the survey said…"} disabled={transitioning || cpuTurn} />
+            <input ref={inputRef} id="answer-input" data-testid="answer-input" value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={32} autoComplete="off" enterKeyHint="send" placeholder={cpuTurn ? "The Rivals are thinking…" : onlineInputLocked ? "Waiting for the other family…" : "Type what the survey said…"} disabled={transitioning || cpuTurn || onlineInputLocked} />
             <span>{answer.length}/32</span>
-            <button type="submit" data-testid="submit-answer" disabled={!answer.trim() || transitioning || cpuTurn}>Submit <b>↵</b></button>
+            <button type="submit" data-testid="submit-answer" disabled={!answer.trim() || transitioning || cpuTurn || onlineInputLocked}>Submit <b>↵</b></button>
           </form>
         </div>
       )}
@@ -642,7 +1027,7 @@ export default function Home() {
         <div className="modal-backdrop pause-backdrop">
           <section className="modal-card pause-card" role="dialog" aria-modal="true" aria-label="Game paused">
             <span className="eyebrow">TIME OUT</span><h2>Game paused</h2><p>The board will be right where you left it.</p>
-            <button className="primary-button" onClick={() => setPaused(false)}><span>Resume game</span><b>▶</b></button>
+            {onlineRole !== "guest" ? <button className="primary-button" onClick={() => setPaused(false)}><span>Resume game</span><b>▶</b></button> : <div className="guest-waiting">Waiting for the host to resume…</div>}
             <button className="secondary-button" onClick={leaveGame}>Exit to menu</button>
           </section>
         </div>

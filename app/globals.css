@@ -155,6 +155,39 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--cyan); outl
 .room-ticket div b { margin-top: 5px; font: 900 20px/1 var(--font-geist-mono); letter-spacing: .15em; }
 .room-ticket p { margin: 0; color: #7e9abd; font-size: 11px; line-height: 1.4; }
 .start-button { width: 100%; margin-top: 16px; }
+.online-lobby-setup { margin-top: 16px; padding: 16px; border: 1px solid rgba(83,199,255,.34); border-radius: 16px; background: linear-gradient(145deg, rgba(12,79,165,.3), rgba(5,28,67,.72)); }
+.online-lobby-setup > .primary-button { width: 100%; }
+.online-lobby-setup > p { margin: 12px 0 0; color: #7f9bbe; text-align: center; font-size: 11px; }
+.join-lobby-row { margin-top: 12px; display: grid; grid-template-columns: 1fr 150px auto; align-items: center; gap: 10px; }
+.join-lobby-row label { color: #74caef; font: 750 8px/1 var(--font-geist-mono); letter-spacing: .13em; }
+.join-lobby-row input { height: 46px; padding: 0 12px; border: 1px solid #3975b6; border-radius: 10px; color: white; background: #061a3c; text-align: center; font: 900 17px/1 var(--font-geist-mono); letter-spacing: .14em; text-transform: uppercase; }
+.join-lobby-row .secondary-button { min-height: 46px; }
+.lobby-error { margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(255,83,107,.42); border-radius: 10px; color: #ffd7dd; background: rgba(155,22,51,.2); font-size: 12px; }
+.lobby-shell { display: flex; flex-direction: column; }
+.lobby-card { width: min(100% - 32px, 860px); margin: 30px auto 50px; padding: clamp(22px, 4vw, 42px); border: 1px solid rgba(100,204,255,.28); border-radius: 24px; background: radial-gradient(circle at 50% -10%, rgba(19,120,255,.28), transparent 42%), rgba(5,24,57,.82); box-shadow: var(--shadow); }
+.lobby-heading { text-align: center; }
+.lobby-heading .live-pill { margin-bottom: 18px; }
+.lobby-heading h1 { margin: 0; font-size: clamp(34px, 6vw, 56px); letter-spacing: -.06em; }
+.lobby-heading p { margin: 10px auto 0; color: #91a9c9; font-size: 14px; }
+.lobby-code-panel { width: min(100%, 490px); margin: 28px auto 24px; padding: 13px 14px 13px 20px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: center; border: 1px solid #4ecbff; border-radius: 16px; background: linear-gradient(145deg, #116fe7, #073884); box-shadow: 0 14px 38px rgba(0,77,204,.3); }
+.lobby-code-panel > span { color: #b8eaff; font: 800 8px/1 var(--font-geist-mono); letter-spacing: .15em; }
+.lobby-code-panel strong { margin-top: 5px; font: 950 31px/1 var(--font-geist-mono); letter-spacing: .2em; }
+.lobby-code-panel button { grid-column: 2; grid-row: 1 / span 2; min-height: 42px; background: rgba(3,26,66,.42); }
+.lobby-families { display: grid; grid-template-columns: 1fr 52px 1fr; align-items: center; gap: 12px; }
+.family-seat { min-height: 130px; padding: 20px; display: flex; flex-direction: column; justify-content: center; border: 1px solid #274d7c; border-radius: 16px; background: rgba(6,27,63,.7); }
+.family-seat.ready { border-color: rgba(78,210,255,.7); background: linear-gradient(145deg, rgba(15,94,202,.65), rgba(6,42,101,.72)); }
+.family-seat > span { color: #69cfff; font: 800 8px/1 var(--font-geist-mono); letter-spacing: .14em; }
+.family-seat h2 { margin: 10px 0 5px; font-size: clamp(20px, 3vw, 30px); letter-spacing: -.035em; }
+.family-seat p { margin: 0; color: #8fa8c9; font-size: 12px; }
+.family-seat.waiting { border-style: dashed; }
+.family-seat.waiting h2 { color: #6e89ac; }
+.versus-badge { width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid #4fcfff; border-radius: 50%; color: white; background: #0b55bd; font: 900 12px/1 var(--font-geist-mono); box-shadow: 0 0 28px rgba(34,164,255,.3); }
+.lobby-status-line { margin: 18px 0 0; display: flex; align-items: center; justify-content: center; gap: 9px; color: #839ebe; font: 700 10px/1 var(--font-geist-mono); }
+.lobby-status-line i { width: 8px; height: 8px; border-radius: 50%; background: #6c83a1; animation: pulse .8s infinite alternate; }
+.lobby-status-line i.ready { background: #5de0ff; box-shadow: 0 0 16px #5de0ff; }
+.guest-waiting { margin-top: 16px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; color: #93adce; background: rgba(5,24,56,.56); text-align: center; font-size: 12px; }
+.lobby-card .start-button { margin-top: 18px; }
+.online-badge { color: #75d8ff; font: 800 8px/1 var(--font-geist-mono); letter-spacing: .1em; }
 
 .game-shell { width: 100%; min-height: 100svh; height: 100svh; overflow: hidden; display: grid; grid-template-rows: 52px 64px 37px minmax(78px, auto) minmax(0, 1fr) auto; gap: 7px; padding: 0 max(12px, calc((100vw - 1080px)/2)) 12px; background: radial-gradient(circle at 50% 30%, #0d3e88 0%, #071d46 40%, #041128 100%); }
 .game-header { width: 100%; max-width: 1080px; height: 52px; padding: 0; }
@@ -243,6 +276,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--cyan); outl
   .menu-footer { position: relative; padding: 0 18px; }
   .setup-card { margin-top: 14px; padding: 24px 16px; }
   .setup-grid { grid-template-columns: 1fr; }
+  .join-lobby-row { grid-template-columns: 1fr 140px; }
+  .join-lobby-row label { grid-column: 1 / -1; }
+  .join-lobby-row .secondary-button { grid-column: 1 / -1; }
   .room-ticket { align-items: flex-start; }
   .game-header .mini-brand b { display: none; }
   .question-card h1 { font-size: clamp(15px, 4.2vw, 20px); }
@@ -272,6 +308,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--cyan); outl
   .names-group label { grid-template-columns: 1fr; gap: 6px; }
   .room-ticket { display: block; }
   .room-ticket p { margin-top: 9px; }
+  .opponent-grid { grid-template-columns: 1fr; }
+  .join-lobby-row { grid-template-columns: 1fr; }
+  .join-lobby-row label, .join-lobby-row .secondary-button { grid-column: 1; }
+  .lobby-card { width: min(100% - 20px, 860px); margin-top: 16px; padding: 22px 14px; }
+  .lobby-code-panel { grid-template-columns: 1fr; text-align: center; padding: 16px; }
+  .lobby-code-panel strong { font-size: 28px; }
+  .lobby-code-panel button { grid-column: 1; grid-row: auto; margin-top: 13px; }
+  .lobby-families { grid-template-columns: 1fr; }
+  .versus-badge { justify-self: center; margin: -4px 0; }
+  .family-seat { min-height: 104px; padding: 16px; text-align: center; }
   .game-shell { padding-inline: 7px; padding-bottom: max(7px, env(safe-area-inset-bottom)); gap: 5px; grid-template-rows: 45px 56px 32px minmax(72px, auto) minmax(0, 1fr) auto; }
   .game-header { height: 45px; }
   .game-header .mini-brand > span { width: 29px; height: 29px; }

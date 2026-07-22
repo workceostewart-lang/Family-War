@@ -7,6 +7,7 @@ A fast, voice-hosted family survey game made for phones, tablets, and PC. Player
 - Responsive blue game-show UI with a no-scroll mobile game board
 - Three escalating survey rounds with strikes, steals, and fuzzy answer matching
 - CPU and same-screen family modes with Easy, Medium, and Hard tuning
+- Private cross-device lobbies with durable Cloudflare D1 state and short party codes
 - Spoken questions, replayable host audio, and Web Audio sound effects
 - Five-question Championship Rush bonus round
 - Installable mobile web-app manifest and branded social sharing card
@@ -28,11 +29,11 @@ Open `http://localhost:3000`.
 npm test
 ```
 
-The test command creates the Cloudflare-compatible production build, runs the game-engine checks, and verifies the rendered product shell and mobile visibility contract.
+The test command creates the Cloudflare-compatible production build, runs the game-engine checks, and verifies the rendered product shell, private-lobby contract, and mobile visibility contract.
 
 ## Production
 
-The project uses vinext and is published through Cloudflare Sites and the Fantom Zone Cloudflare Worker route. Hosting identity is stored in `.openai/hosting.json`, while `wrangler.jsonc` owns the public `family-war.fantomzone.app/*` route so it takes priority over Fantom Zone's fallback game.
+The project uses vinext and is published through Cloudflare Sites and the Fantom Zone Cloudflare Worker route. Hosting identity is stored in `.openai/hosting.json`, while `wrangler.jsonc` owns the public `family-war.fantomzone.app/*` route so it takes priority over Fantom Zone's fallback game. Private lobbies persist in the `family-war-lobbies` D1 database through the `DB` binding.
 
 ```bash
 npm run deploy:cloudflare
