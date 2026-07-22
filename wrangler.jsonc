@@ -6,6 +6,10 @@
     {
       "pattern": "family-war.fantomzone.app/*",
       "zone_name": "fantomzone.app"
+    },
+    {
+      "pattern": "family-war.fantomzone.app",
+      "custom_domain": true
     }
   ],
   "observability": {
