@@ -1,5 +1,5 @@
 export type Answer = { text: string; points: number; aliases?: string[] };
-export type Question = { prompt: string; answers: Answer[] };
+export type Question = { prompt: string; answers: Answer[]; group?: string };
 
 export const QUESTIONS: Question[];
 export const BONUS_QUESTIONS: Question[];

@@ -4,7 +4,7 @@ import { BONUS_QUESTIONS, pickQuestionCycleIds, pickQuestionIds, QUESTIONS } fro
 
 test("ships a deep, family-friendly question bank", () => {
   assert.ok(QUESTIONS.length >= 50, `expected at least 50 regular questions, received ${QUESTIONS.length}`);
-  assert.ok(BONUS_QUESTIONS.length >= 75, `expected at least 75 rapid-fire questions, received ${BONUS_QUESTIONS.length}`);
+  assert.ok(BONUS_QUESTIONS.length >= 325, `expected at least 325 rapid-fire questions, received ${BONUS_QUESTIONS.length}`);
   assert.equal(new Set(QUESTIONS.map((question) => question.prompt)).size, QUESTIONS.length);
   assert.equal(new Set(BONUS_QUESTIONS.map((question) => question.prompt)).size, BONUS_QUESTIONS.length);
 
@@ -13,6 +13,13 @@ test("ships a deep, family-friendly question bank", () => {
     assert.equal(question.answers.reduce((total, answer) => total + answer.points, 0), 100, question.prompt);
   }
   for (const question of BONUS_QUESTIONS) assert.equal(question.answers.length, 3, question.prompt);
+
+  const variations = BONUS_QUESTIONS.filter((question) => question.group);
+  assert.equal(variations.length, 250);
+  assert.equal(new Set(variations.map((question) => question.group)).size, 50);
+  for (const group of new Set(variations.map((question) => question.group))) {
+    assert.equal(variations.filter((question) => question.group === group).length, 5, group);
+  }
 });
 
 test("new-game decks are unique and avoid the previous match", () => {
@@ -37,8 +44,9 @@ test("Sudden Death cycles through the full bank before repeating", () => {
   let previous = [];
   const seen = new Set();
 
-  for (let round = 0; round < 15; round += 1) {
-    const result = pickQuestionCycleIds(BONUS_QUESTIONS.length, 5, usedIds, previous, () => (round + 1) / 17);
+  const totalRounds = BONUS_QUESTIONS.length / 5;
+  for (let round = 0; round < totalRounds; round += 1) {
+    const result = pickQuestionCycleIds(BONUS_QUESTIONS.length, 5, usedIds, previous, () => (round + 1) / (totalRounds + 2));
     assert.equal(result.ids.length, 5);
     assert.ok(result.ids.every((id) => !seen.has(id)));
     result.ids.forEach((id) => seen.add(id));
