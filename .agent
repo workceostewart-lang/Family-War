@@ -7,6 +7,7 @@ Family War is a responsive, voice-hosted survey game built with Next.js/vinext f
 - Treat the game board as the product. On mobile, the current question, all six answer slots, the full three-strike indicator, team scores, and answer input must fit inside the visible viewport without horizontal scrolling.
 - Keep the visual language deep blue, electric blue, cyan, and restrained red for strikes.
 - Questions must stay visible while players answer and must have a replayable spoken-host control.
+- At the end of every regular round, slowly reveal all remaining survey answers before advancing. After Sudden Death, recap all five boards and slowly reveal every missed answer. These paced reveals are host-authoritative and must stay synchronized in private lobbies.
 - Every new match must draw three regular and five rapid-fire questions that do not repeat the immediately previous match. Keep at least 325 rapid-fire questions in the Sudden Death bank and exhaust that bank before starting a new question cycle. Preserve the 60-second regular-answer timer and 40-second Sudden Death timer on the visible question card.
 - Maintain 44px touch targets wherever space allows and full keyboard play on desktop.
 - Private lobby codes use Cloudflare D1 for real cross-device waiting rooms, host-authoritative board synchronization, and guest answer submission. Keep host and guest tokens private and require them on lobby reads and writes.

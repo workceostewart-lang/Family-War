@@ -1,16 +1,21 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { chooseCpuAnswer, findMatchingAnswer, makeLobbyCode } from "../lib/game-engine.mjs";
+import { chooseCpuAnswer, findMatchingAnswer, getUnrevealedAnswerIndexes, makeLobbyCode } from "../lib/game-engine.mjs";
 import { BONUS_QUESTIONS, pickQuestionCycleIds, pickQuestionIds, QUESTIONS } from "../lib/questions.mjs";
 
 type Difficulty = "easy" | "medium" | "hard";
 type Opponent = "cpu" | "local" | "online";
 type TeamIndex = 0 | 1;
 type Screen = "menu" | "setup" | "lobby" | "game";
-type GamePhase = "round" | "bonus-intro" | "bonus-playing" | "bonus-end";
+type GamePhase = "round" | "bonus-intro" | "bonus-playing" | "bonus-reveal" | "bonus-end";
 type Modal = "rules" | "settings" | null;
 type OnlineRole = "host" | "guest" | null;
+type BonusResult = {
+  questionId: number;
+  matchedIndex: number | null;
+  points: number;
+};
 
 type LobbyInfo = {
   code: string;
@@ -37,6 +42,9 @@ type SharedGameState = {
   roundQuestionIds?: number[];
   bonusQuestionIds?: number[];
   usedBonusQuestionIds?: number[];
+  bonusResults?: BonusResult[];
+  bonusRevealIndex?: number;
+  bonusRevealedAnswers?: number[];
   transitioning: boolean;
   paused: boolean;
 };
@@ -90,6 +98,9 @@ export default function Home() {
   const [roundQuestionIds, setRoundQuestionIds] = useState(() => pickQuestionIds(QUESTIONS.length, ROUND_COUNT));
   const [bonusQuestionIds, setBonusQuestionIds] = useState(() => pickQuestionIds(BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT));
   const [usedBonusQuestionIds, setUsedBonusQuestionIds] = useState<number[]>([]);
+  const [bonusResults, setBonusResults] = useState<BonusResult[]>([]);
+  const [bonusRevealIndex, setBonusRevealIndex] = useState(0);
+  const [bonusRevealedAnswers, setBonusRevealedAnswers] = useState<number[]>([]);
   const [transitioning, setTransitioning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [roomCode, setRoomCode] = useState("");
@@ -104,6 +115,9 @@ export default function Home() {
 
   const question = QUESTIONS[roundQuestionIds[roundIndex] ?? roundQuestionIds[0] ?? 0];
   const bonusQuestion = BONUS_QUESTIONS[bonusQuestionIds[bonusIndex] ?? bonusQuestionIds[0] ?? 0];
+  const bonusRevealQuestionId = bonusQuestionIds[bonusRevealIndex] ?? bonusQuestionIds[0] ?? 0;
+  const bonusRevealQuestion = BONUS_QUESTIONS[bonusRevealQuestionId];
+  const bonusRevealResult = bonusResults.find((result) => result.questionId === bonusRevealQuestionId);
   const multiplier = roundIndex + 1;
   const activeTeam = round.control;
   const cpuTurn = screen === "game" && phase === "round" && opponent === "cpu" && activeTeam === 1;
@@ -179,11 +193,17 @@ export default function Home() {
 
   useEffect(() => {
     if (screen !== "game" || paused) return;
-    const currentPrompt = phase === "bonus-playing" ? bonusQuestion?.prompt : phase === "round" ? question?.prompt : "";
+    const currentPrompt = phase === "bonus-playing"
+      ? bonusQuestion?.prompt
+      : phase === "bonus-reveal"
+        ? bonusRevealQuestion?.prompt
+        : phase === "round"
+          ? question?.prompt
+          : "";
     if (!currentPrompt) return;
     const timer = window.setTimeout(() => speak(currentPrompt), 350);
     return () => window.clearTimeout(timer);
-  }, [bonusIndex, bonusQuestion, paused, phase, question, screen, speak]);
+  }, [bonusIndex, bonusQuestion, bonusRevealIndex, bonusRevealQuestion, paused, phase, question, screen, speak]);
 
   useEffect(() => {
     if (phase !== "bonus-playing" || paused || bonusSeconds <= 0 || onlineRole === "guest") return;
@@ -195,16 +215,8 @@ export default function Home() {
 
   useEffect(() => {
     if (onlineRole === "guest") return;
-    if (phase === "bonus-playing" && bonusSeconds === 0) {
-      const timer = window.setTimeout(() => {
-        setPhase("bonus-end");
-        setStatus("Time! The final board is locked.");
-        playSound(bonusScore >= 200 ? "win" : "strike");
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
     if (phase === "bonus-playing" && bonusSeconds > 0 && bonusSeconds <= 5) playSound("tick");
-  }, [bonusScore, bonusSeconds, onlineRole, phase, playSound]);
+  }, [bonusSeconds, onlineRole, phase, playSound]);
 
   useEffect(() => () => {
     if (transitionTimer.current) clearTimeout(transitionTimer.current);
@@ -253,6 +265,9 @@ export default function Home() {
     setRoundQuestionIds(nextRoundIds);
     setBonusQuestionIds(nextBonusIds);
     setUsedBonusQuestionIds(nextUsedBonusIds);
+    setBonusResults([]);
+    setBonusRevealIndex(0);
+    setBonusRevealedAnswers([]);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
@@ -294,6 +309,9 @@ export default function Home() {
     setRoundQuestionIds(nextRoundIds);
     setBonusQuestionIds(nextBonusCycle.ids);
     setUsedBonusQuestionIds(nextBonusCycle.usedIds);
+    setBonusResults([]);
+    setBonusRevealIndex(0);
+    setBonusRevealedAnswers([]);
     setTransitioning(false);
     setPaused(false);
     setScreen("game");
@@ -415,14 +433,21 @@ export default function Home() {
     };
   }, [activeLobbyCode, beginOnlineGame, onlineRole, onlineToken, screen]);
 
-  const awardRound = useCallback((team: TeamIndex, points: number, message: string) => {
+  const awardRound = useCallback((team: TeamIndex, points: number, message: string, finalRevealed: number[]) => {
     const nextScores: [number, number] = [...scores];
     nextScores[team] += points;
     setScores(nextScores);
     setStatus(message);
     setTransitioning(true);
+    setRound((current) => ({
+      ...current,
+      revealed: [...new Set([...current.revealed, ...finalRevealed])],
+    }));
     playSound("win");
-    transitionTimer.current = setTimeout(() => {
+
+    const remainingAnswers = getUnrevealedAnswerIndexes(question.answers.length, finalRevealed);
+
+    const finishRound = () => {
       if (roundIndex >= ROUND_COUNT - 1) {
         const winner: TeamIndex = nextScores[1] > nextScores[0] ? 1 : 0;
         setChampion(winner);
@@ -438,8 +463,34 @@ export default function Home() {
       setAnswer("");
       setTransitioning(false);
       window.setTimeout(() => inputRef.current?.focus(), 100);
-    }, 950);
-  }, [cleanTeamNames, playSound, roundIndex, scores]);
+    };
+
+    let revealPosition = 0;
+    const revealNextAnswer = () => {
+      const revealIndex = remainingAnswers[revealPosition];
+      if (revealIndex === undefined) {
+        transitionTimer.current = setTimeout(finishRound, 950);
+        return;
+      }
+
+      const revealedAnswer = question.answers[revealIndex];
+      revealPosition += 1;
+      setRound((current) => ({
+        ...current,
+        revealed: current.revealed.includes(revealIndex)
+          ? current.revealed
+          : [...current.revealed, revealIndex],
+      }));
+      setStatus(`Survey answer ${revealIndex + 1}: ${revealedAnswer.text} — ${revealedAnswer.points * multiplier} points.`);
+      playSound("correct");
+      transitionTimer.current = setTimeout(revealNextAnswer, 900);
+    };
+
+    transitionTimer.current = setTimeout(
+      remainingAnswers.length > 0 ? revealNextAnswer : finishRound,
+      remainingAnswers.length > 0 ? 750 : 950,
+    );
+  }, [cleanTeamNames, multiplier, playSound, question.answers, roundIndex, scores]);
 
   const processRoundAnswer = useCallback((guess: string, timedOut = false) => {
     if (transitioning || (!timedOut && !guess.trim())) return;
@@ -455,9 +506,9 @@ export default function Home() {
       setRound({ ...round, revealed, bank });
       setStatus(`Survey says… ${question.answers[match].text}! +${points}`);
       if (round.stealing) {
-        awardRound(round.control, bank, `${cleanTeamNames[round.control]} steals ${bank} points!`);
+        awardRound(round.control, bank, `${cleanTeamNames[round.control]} steals ${bank} points!`, revealed);
       } else if (revealed.length === question.answers.length) {
-        awardRound(round.control, bank, `${cleanTeamNames[round.control]} cleared the board for ${bank}!`);
+        awardRound(round.control, bank, `${cleanTeamNames[round.control]} cleared the board for ${bank}!`, revealed);
       }
       return;
     }
@@ -465,7 +516,12 @@ export default function Home() {
     playSound("strike");
     if (round.stealing) {
       const defendingTeam = (round.control === 0 ? 1 : 0) as TeamIndex;
-      awardRound(defendingTeam, round.bank, `${timedOut ? "Time! " : ""}No steal! ${cleanTeamNames[defendingTeam]} keeps ${round.bank} points.`);
+      awardRound(
+        defendingTeam,
+        round.bank,
+        `${timedOut ? "Time! " : ""}No steal! ${cleanTeamNames[defendingTeam]} keeps ${round.bank} points.`,
+        round.revealed,
+      );
       return;
     }
 
@@ -546,28 +602,96 @@ export default function Home() {
     setBonusIndex(0);
     setBonusScore(0);
     setBonusSeconds(BONUS_TIME_LIMIT);
+    setBonusResults([]);
+    setBonusRevealIndex(0);
+    setBonusRevealedAnswers([]);
     setStatus("Five questions. Forty seconds. Reach 200 points!");
     window.setTimeout(() => inputRef.current?.focus(), 200);
   };
+
+  const beginBonusReveal = useCallback((results: BonusResult[], message: string) => {
+    const firstQuestionId = bonusQuestionIds[0] ?? 0;
+    const firstResult = results.find((result) => result.questionId === firstQuestionId);
+    setBonusResults(results);
+    setBonusRevealIndex(0);
+    setBonusRevealedAnswers(firstResult?.matchedIndex === null || firstResult?.matchedIndex === undefined ? [] : [firstResult.matchedIndex]);
+    setAnswer("");
+    setStatus(message);
+    setPhase("bonus-reveal");
+  }, [bonusQuestionIds]);
 
   const processBonusAnswer = useCallback((guess: string) => {
     if (!guess.trim() || phase !== "bonus-playing") return;
     const match = findMatchingAnswer(guess, bonusQuestion.answers, [], difficulty);
     const points = match >= 0 ? bonusQuestion.answers[match].points : 0;
     const nextScore = bonusScore + points;
+    const nextResults = [
+      ...bonusResults,
+      {
+        questionId: bonusQuestionIds[bonusIndex],
+        matchedIndex: match >= 0 ? match : null,
+        points,
+      },
+    ];
     setBonusScore(nextScore);
+    setBonusResults(nextResults);
     setAnswer("");
     playSound(points > 0 ? "correct" : "strike");
     if (bonusIndex >= bonusQuestionIds.length - 1) {
-      setPhase("bonus-end");
-      setStatus(points > 0 ? `Final answer scores ${points}!` : "Final answer scores zero.");
-      window.setTimeout(() => playSound(nextScore >= 200 ? "win" : "strike"), 250);
+      beginBonusReveal(nextResults, "All five answers are in. Let’s reveal every Sudden Death board.");
     } else {
       setStatus(points > 0 ? `That scores ${points}! Next question.` : "No points. Shake it off—next question!");
       setBonusIndex((value) => value + 1);
       window.setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [bonusIndex, bonusQuestion, bonusQuestionIds.length, bonusScore, difficulty, phase, playSound]);
+  }, [beginBonusReveal, bonusIndex, bonusQuestion, bonusQuestionIds, bonusResults, bonusScore, difficulty, phase, playSound]);
+
+  useEffect(() => {
+    if (onlineRole === "guest" || phase !== "bonus-playing" || bonusSeconds !== 0) return;
+    const timer = window.setTimeout(() => {
+      beginBonusReveal(bonusResults, "Time! Now let’s reveal every Sudden Death board.");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [beginBonusReveal, bonusResults, bonusSeconds, onlineRole, phase]);
+
+  useEffect(() => {
+    if (onlineRole === "guest" || phase !== "bonus-reveal" || paused) return;
+
+    const missingAnswers = getUnrevealedAnswerIndexes(
+      bonusRevealQuestion.answers.length,
+      bonusRevealedAnswers,
+    );
+
+    if (missingAnswers.length > 0) {
+      const revealIndex = missingAnswers[0];
+      const revealedAnswer = bonusRevealQuestion.answers[revealIndex];
+      const timer = window.setTimeout(() => {
+        setBonusRevealedAnswers((current) => current.includes(revealIndex) ? current : [...current, revealIndex]);
+        setStatus(`Board answer ${revealIndex + 1}: ${revealedAnswer.text} — ${revealedAnswer.points} points.`);
+        playSound("correct");
+      }, 900);
+      return () => window.clearTimeout(timer);
+    }
+
+    if (bonusRevealIndex < bonusQuestionIds.length - 1) {
+      const timer = window.setTimeout(() => {
+        const nextIndex = bonusRevealIndex + 1;
+        const nextQuestionId = bonusQuestionIds[nextIndex];
+        const nextResult = bonusResults.find((result) => result.questionId === nextQuestionId);
+        setBonusRevealIndex(nextIndex);
+        setBonusRevealedAnswers(nextResult?.matchedIndex === null || nextResult?.matchedIndex === undefined ? [] : [nextResult.matchedIndex]);
+        setStatus(`Sudden Death board ${nextIndex + 1} of ${bonusQuestionIds.length}.`);
+      }, 1100);
+      return () => window.clearTimeout(timer);
+    }
+
+    const timer = window.setTimeout(() => {
+      setPhase("bonus-end");
+      setStatus(bonusScore >= 200 ? "Championship won!" : "A fierce finish!");
+      playSound(bonusScore >= 200 ? "win" : "strike");
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [bonusQuestionIds, bonusResults, bonusRevealIndex, bonusRevealQuestion, bonusRevealedAnswers, bonusScore, onlineRole, paused, phase, playSound]);
 
   const submitBonusAnswer = async (event: FormEvent) => {
     event.preventDefault();
@@ -603,6 +727,9 @@ export default function Home() {
       roundQuestionIds,
       bonusQuestionIds,
       usedBonusQuestionIds,
+      bonusResults,
+      bonusRevealIndex,
+      bonusRevealedAnswers,
       transitioning,
       paused,
     };
@@ -614,7 +741,7 @@ export default function Home() {
       });
     }, 100);
     return () => window.clearTimeout(timer);
-  }, [bonusIndex, bonusQuestionIds, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, roundQuestionIds, roundSeconds, scores, screen, status, transitioning, usedBonusQuestionIds]);
+  }, [bonusIndex, bonusQuestionIds, bonusResults, bonusRevealIndex, bonusRevealedAnswers, bonusScore, bonusSeconds, champion, lobbyInfo, onlineRole, onlineToken, paused, phase, round, roundIndex, roundQuestionIds, roundSeconds, scores, screen, status, transitioning, usedBonusQuestionIds]);
 
   useEffect(() => {
     if (screen !== "game" || onlineRole !== "guest" || !activeLobbyCode || !onlineToken) return;
@@ -644,6 +771,9 @@ export default function Home() {
         if (hasValidQuestionDeck(remote.roundQuestionIds, QUESTIONS.length, ROUND_COUNT)) setRoundQuestionIds(remote.roundQuestionIds!);
         if (hasValidQuestionDeck(remote.bonusQuestionIds, BONUS_QUESTIONS.length, BONUS_QUESTION_COUNT)) setBonusQuestionIds(remote.bonusQuestionIds!);
         if (Array.isArray(remote.usedBonusQuestionIds)) setUsedBonusQuestionIds(remote.usedBonusQuestionIds);
+        setBonusResults(Array.isArray(remote.bonusResults) ? remote.bonusResults : []);
+        setBonusRevealIndex(remote.bonusRevealIndex ?? 0);
+        setBonusRevealedAnswers(Array.isArray(remote.bonusRevealedAnswers) ? remote.bonusRevealedAnswers : []);
         setTransitioning(remote.transitioning);
         setPaused(remote.paused);
       } catch {
@@ -713,8 +843,9 @@ export default function Home() {
               <ol className="rules-list">
                 <li><b>Find the board.</b><span>Type a popular survey answer before the 60-second answer clock expires. Close matches and common synonyms count.</span></li>
                 <li><b>Protect control.</b><span>Three misses means the other family gets one chance to steal the bank.</span></li>
+                <li><b>Reveal the board.</b><span>When a round ends, every missed survey answer turns over slowly before the next question.</span></li>
                 <li><b>Build the score.</b><span>Rounds are worth 1×, 2×, then 3× points.</span></li>
-                <li><b>Finish the war.</b><span>The winner gets a 40-second Sudden Death Championship Rush to reach 200 bonus points.</span></li>
+                <li><b>Finish the war.</b><span>The winner gets a 40-second Sudden Death Championship Rush, followed by a full five-board answer reveal.</span></li>
               </ol>
             </>
           ) : (
@@ -904,14 +1035,18 @@ export default function Home() {
   }
 
   const isBonus = phase !== "round";
-  const gamePrompt = phase === "bonus-playing" ? bonusQuestion.prompt : question.prompt;
+  const gamePrompt = phase === "bonus-playing"
+    ? bonusQuestion.prompt
+    : phase === "bonus-reveal"
+      ? bonusRevealQuestion.prompt
+      : question.prompt;
 
   return (
     <main className={`game-shell ${isBonus ? "bonus-mode" : ""}`}>
       <header className="game-header">
         <div className="mini-brand"><span>FW</span><b>FAMILY WAR</b></div>
         <div className="round-chip">{isBonus ? "SUDDEN DEATH · CHAMPIONSHIP RUSH" : `ROUND ${roundIndex + 1} · ${multiplier}× POINTS`}</div>
-        {onlineRole !== "guest" ? <button className="icon-button" data-testid="pause-game" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button> : <div className="online-badge">LIVE · {lobbyInfo?.code}</div>}
+        {onlineRole !== "guest" ? <button className="icon-button" data-testid="pause-game" onClick={() => setPaused(true)} aria-label="Pause game" disabled={transitioning}>Ⅱ</button> : <div className="online-badge">LIVE · {lobbyInfo?.code}</div>}
       </header>
 
       <section className="score-ribbon" aria-label="Scoreboard">
@@ -926,17 +1061,17 @@ export default function Home() {
 
       {phase === "round" && (
         <div className="strike-ribbon" data-testid="strikes" aria-label={`${round.strikes} strikes`}>
-          <span>{round.stealing ? "STEAL ATTEMPT" : `${cleanTeamNames[activeTeam]} ANSWERS`}</span>
+          <span>{transitioning ? "SURVEY BOARD REVEAL" : round.stealing ? "STEAL ATTEMPT" : `${cleanTeamNames[activeTeam]} ANSWERS`}</span>
           <div>{[0, 1, 2].map((index) => <b key={index} className={round.strikes > index ? "lit" : ""}>×</b>)}</div>
         </div>
       )}
 
       <section className="question-card" data-testid="question">
         <div>
-          <span>{phase === "bonus-playing" ? `QUESTION ${bonusIndex + 1} OF 5` : phase === "round" ? "WE ASKED 100 PEOPLE" : "THE MAIN GAME IS COMPLETE"}</span>
+          <span>{phase === "bonus-playing" ? `QUESTION ${bonusIndex + 1} OF 5` : phase === "bonus-reveal" ? `BOARD ${bonusRevealIndex + 1} OF 5 · ANSWERS REVEALED` : phase === "round" ? "WE ASKED 100 PEOPLE" : "THE MAIN GAME IS COMPLETE"}</span>
           <h1>{phase === "bonus-intro" ? `${cleanTeamNames[champion]} owns the board!` : phase === "bonus-end" ? (bonusScore >= 200 ? "Championship won!" : "A fierce finish!") : gamePrompt}</h1>
         </div>
-        {(phase === "round" || phase === "bonus-playing") && <button onClick={() => speak(gamePrompt)} aria-label="Read question aloud">♫ <span>PLAY QUESTION</span></button>}
+        {(phase === "round" || phase === "bonus-playing" || phase === "bonus-reveal") && <button onClick={() => speak(gamePrompt)} aria-label="Read question aloud">♫ <span>PLAY QUESTION</span></button>}
         {phase === "round" && <time data-testid="round-timer" className={roundSeconds <= 10 ? "danger" : ""} aria-label={`${roundSeconds} seconds left`}>{roundSeconds}</time>}
         {phase === "bonus-playing" && <time data-testid="bonus-timer" className={bonusSeconds <= 5 ? "danger" : ""} aria-label={`${bonusSeconds} seconds left`}>{bonusSeconds}</time>}
       </section>
@@ -970,6 +1105,22 @@ export default function Home() {
         </section>
       )}
 
+      {phase === "bonus-reveal" && (
+        <section className="answer-board bonus-reveal-board" data-testid="bonus-reveal-board" aria-label={`Sudden Death answer board ${bonusRevealIndex + 1} of 5`}>
+          {bonusRevealQuestion.answers.map((item, index) => {
+            const revealed = bonusRevealedAnswers.includes(index);
+            const playerAnswer = bonusRevealResult?.matchedIndex === index;
+            return (
+              <div key={item.text} className={`answer-tile ${revealed ? "revealed" : ""} ${playerAnswer ? "player-answer" : ""}`}>
+                <i>{index + 1}</i>
+                <span>{revealed ? item.text : "• • •"}</span>
+                <b>{revealed ? item.points : "—"}</b>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       {phase === "bonus-end" && (
         <section className="bonus-result">
           <div className="result-burst"><span>{bonusScore}</span><small>/ 200</small></div>
@@ -989,6 +1140,10 @@ export default function Home() {
             <button type="submit" data-testid="submit-answer" disabled={!answer.trim() || transitioning || cpuTurn || onlineInputLocked}>Submit <b>↵</b></button>
           </form>
         </div>
+      )}
+
+      {phase === "bonus-reveal" && (
+        <div className="status-line reveal-status" aria-live="polite"><i />{status}</div>
       )}
 
       {paused && (

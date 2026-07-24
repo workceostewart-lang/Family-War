@@ -117,6 +117,11 @@ test("keeps the mobile gameplay visibility contract in source", async () => {
   assert.match(page, /data-testid="strikes"/);
   assert.match(page, /data-testid="round-timer"/);
   assert.match(page, /data-testid="bonus-timer"/);
+  assert.match(page, /data-testid="bonus-reveal-board"/);
+  assert.match(page, /"bonus-reveal"/);
+  assert.match(page, /SURVEY BOARD REVEAL/);
+  assert.match(page, /getUnrevealedAnswerIndexes/);
+  assert.match(page, /full five-board answer reveal/i);
   assert.match(page, /ROUND_TIME_LIMIT = 60/);
   assert.match(page, /BONUS_TIME_LIMIT = 40/);
   assert.match(page, /pickQuestionIds/);

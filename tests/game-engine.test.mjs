@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chooseCpuAnswer, findMatchingAnswer, makeLobbyCode, normalizeAnswer, similarity } from "../lib/game-engine.mjs";
+import { chooseCpuAnswer, findMatchingAnswer, getUnrevealedAnswerIndexes, makeLobbyCode, normalizeAnswer, similarity } from "../lib/game-engine.mjs";
 
 const answers = [
   { text: "Toilet paper", points: 34, aliases: ["bathroom tissue", "tp"] },
@@ -18,6 +18,12 @@ test("accepts aliases and common wording", () => {
 
 test("does not return an answer that is already revealed", () => {
   assert.equal(findMatchingAnswer("remote", answers, [1], "easy"), -1);
+});
+
+test("keeps missed survey answers in board order for paced reveals", () => {
+  assert.deepEqual(getUnrevealedAnswerIndexes(6, [0, 3, 5]), [1, 2, 4]);
+  assert.deepEqual(getUnrevealedAnswerIndexes(3, []), [0, 1, 2]);
+  assert.deepEqual(getUnrevealedAnswerIndexes(3, [0, 1, 2]), []);
 });
 
 test("hard mode rejects loose guesses", () => {
